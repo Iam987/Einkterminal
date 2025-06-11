@@ -2,6 +2,7 @@
 #include <WebServer.h>
 #include <EEPROM.h>
 #include <HTTPClient.h>
+#include <Ticker.h>
 
 #define EEPROM_SIZE 96
 #define SSID_ADDR 0
@@ -11,6 +12,39 @@ const char* fallbackSSID = "ESP32-Setup";
 const char* fallbackPASS = "configureme";
 
 WebServer server(80);
+
+Ticker registerTicker;
+volatile bool shouldRegister = false;
+volatile int Timeout = 290;
+volatile int FailCount = 0;
+
+void IRAM_ATTR triggerRegister() {
+  shouldRegister = true;
+}
+
+void registerWithServer() {
+  String mac = WiFi.macAddress();
+  HTTPClient http;
+  http.begin("http://kool105.ddns.net:2626/esp/register");
+  http.addHeader("Content-Type", "application/json");
+
+  String json = "{\"mac\": \"" + mac + "\"}";
+  int httpCode = http.POST(json);
+  if (httpCode > 0) {
+    Serial.printf("Registration response: %s\n", http.getString().c_str());
+    Timeout = 290;
+    FailCount = 0
+  } else {
+    Serial.printf("Registration failed: %s\n", http.errorToString(httpCode).c_str());
+    Timeout = 10;
+    FailCount += 1;
+    if (FailCount > 30){
+      ESP.restart();
+    }
+  }
+  http.end();
+}
+
 
 void saveWiFiCredentials(const String& ssid, const String& pass) {
   for (int i = 0; i < 32; ++i) {
@@ -92,7 +126,7 @@ bool tryConnectWiFi(const String& ssid, const String& pass, int timeout = 10000)
 
 void fetchWebText() {
   HTTPClient http;
-  http.begin("http://kool105.ddns.net:2626/"); // Replace with your URL
+  http.begin("http://kool105.ddns.net:2626/esp"); // Replace with your URL
   int httpCode = http.GET();
   if (httpCode > 0) {
     String payload = http.getString();
@@ -119,11 +153,18 @@ void setup() {
     Serial.println(ssid);
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-
-    fetchWebText();
+    registerWithServer();
+    registerTicker.attach(Timeout,triggerRegister);
+    
   }
 }
 
 void loop() {
   server.handleClient();
+
+  if (shouldRegister){
+    shouldRegister = false;
+    registerWithServer();
+    registerTicker.attach(Timeout,triggerRegister);
+  }
 }
