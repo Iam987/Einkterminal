@@ -58,41 +58,6 @@ void registerWithServer() {
   http.end();
 }
 
-
-bool downloadImage(const String& mac) {
-  HTTPClient http;
-  String url = "http://kool105.ddns.net:2626/esp/images/" + mac + ".bmp";
-
-  http.begin(url);
-  int httpCode = http.GET();
-
-  if (httpCode == HTTP_CODE_OK) {
-    WiFiClient* stream = http.getStreamPtr();
-
-    File file = SPIFFS.open("/image.bmp", "w");
-    if (!file) {
-      Serial.println("Failed to open file for writing");
-      http.end();
-      return false;
-    }
-
-    uint8_t buffer[512];
-    int len;
-    while ((len = stream->readBytes(buffer, sizeof(buffer))) > 0) {
-      file.write(buffer, len);
-    }
-
-    file.close();
-    Serial.println("Image downloaded");
-    http.end();
-    return true;
-  } else {
-    Serial.printf("HTTP GET failed: %d\n", httpCode);
-    http.end();
-    return false;
-  }
-}
-
 void fetchAndDisplayBMP(const String& mac) {
   String url = "http://kool105.ddns.net:2626/esp/images/" + mac + ".bmp";
 
@@ -105,31 +70,40 @@ void fetchAndDisplayBMP(const String& mac) {
 
     const int width = 600;
     const int height = 448;
-    int totalPixels = width * height;
+    const int rowBytes = width * 3;
+    uint8_t rowBuf[rowBytes];
     bool toggle = false;
     uint8_t last = 0;
 
     EPD_5IN65F_init();
 
-    for (int i = 0; i < totalPixels; ++i) {
-      while (stream->available() < 3);  // Wait for RGB triplet
+    for (int row = height - 1; row >= 0; --row) {
+      int offset = row * rowBytes;
 
-      uint8_t r = stream->read();
-      uint8_t g = stream->read();
-      uint8_t b = stream->read();
+      // Wait until the full row is available
+      while (stream->available() < rowBytes);
 
-      uint8_t epdColor = rgbToEpdIndex(r, g, b);
+      // Read full row
+      stream->readBytes(rowBuf, rowBytes);
 
-      if (toggle) {
-        EPD_SendData((epdColor << 4) | last); // second nibble is first pixel
-      } else {
-        last = epdColor;
+      for (int col = 0; col < width; ++col) {
+        int i = col * 3;
+        uint8_t b = rowBuf[i];
+        uint8_t g = rowBuf[i + 1];
+        uint8_t r = rowBuf[i + 2];  // BMP uses BGR; swap to RGB
+
+        uint8_t epdColor = rgbToEpdIndex(r, g, b);
+
+        if (toggle) {
+          EPD_SendData((epdColor << 4) | last);
+        } else {
+          last = epdColor;
+        }
+
+        toggle = !toggle;
       }
-
-      toggle = !toggle;
     }
 
-    // Handle odd pixel count
     if (!toggle) {
       EPD_SendData(last << 4);
     }
@@ -142,18 +116,16 @@ void fetchAndDisplayBMP(const String& mac) {
   http.end();
 }
 
-
 uint8_t rgbToEpdIndex(uint8_t r, uint8_t g, uint8_t b) {
-  if (r < 128 && g < 128 && b < 128) return 0;           // Black
-  if (r > 200 && g > 200 && b > 200) return 1;           // White
-  if (r < 128 && g > 200 && b < 128) return 2;           // Green
-  if (r < 128 && g < 128 && b > 200) return 3;           // Blue
-  if (r > 200 && g < 128 && b < 128) return 4;           // Red
-  if (r > 200 && g > 200 && b < 128) return 5;           // Yellow
-  if (r > 200 && g > 100 && b < 50)  return 6;           // Orange
-  return 1;  // Default to white
+  if (r < 64 && g < 64 && b < 64) return 0; // Black
+  if (r > 200 && g > 200 && b > 200) return 1; // White
+  if (r < 80 && g > 180 && b < 80) return 2; // Green
+  if (r < 80 && g < 80 && b > 180) return 3; // Blue
+  if (r > 180 && g < 80 && b < 80) return 4; // Red
+  if (r > 200 && g > 180 && b < 100) return 5; // Yellow
+  if (r > 200 && g > 100 && g < 180 && b < 80) return 6; // Orange
+  return 1; // Default to white
 }
-
 
 
 void saveWiFiCredentials(const String& ssid, const String& pass, const String& user, const String& userpass) {
