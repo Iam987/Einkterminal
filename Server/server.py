@@ -1,13 +1,139 @@
-from flask import Flask, request, jsonify, render_template_string, send_from_directory, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, send_from_directory, session, redirect, url_for, send_file, render_template
 import os
 import json
 from datetime import datetime, timedelta
+from PIL import Image
+import numpy as np
 
 app = Flask(__name__, static_folder='.')
 app.secret_key = 'beepboop'
 
 REGISTRY_FILE = "device_registry.json"
 device_registry = {}
+
+UPLOAD_FOLDER = "static/images"
+PALETTE = np.array([
+    [0, 0, 0],         # black
+    [255, 255, 255],   # white
+    [0, 255, 0],       # green
+    [0, 0, 255],       # blue
+    [255, 0, 0],       # red
+    [255, 255, 0],     # yellow
+    [255, 128, 0],     # orange
+], dtype=np.uint8)
+
+def dither_to_palette(img):
+    # Resize early to 600x448 to reduce processing time
+    img = img.resize((600, 448)).convert("RGB")
+    arr = np.array(img, dtype=np.float32)
+
+    height, width, _ = arr.shape
+    for y in range(height):
+        for x in range(width):
+            old_pixel = arr[y, x]
+            distances = np.sum((PALETTE - old_pixel) ** 2, axis=1)
+            new_pixel = PALETTE[np.argmin(distances)]
+            error = old_pixel - new_pixel
+            arr[y, x] = new_pixel
+
+            # Floyd–Steinberg error diffusion
+            if x + 1 < width:
+                arr[y, x + 1] += error * 7 / 16
+            if x - 1 >= 0 and y + 1 < height:
+                arr[y + 1, x - 1] += error * 3 / 16
+            if y + 1 < height:
+                arr[y + 1, x] += error * 5 / 16
+            if x + 1 < width and y + 1 < height:
+                arr[y + 1, x + 1] += error * 1 / 16
+
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
+
+
+@app.route("/esp/endpoint/<mac>/uploadfile", methods=["POST"])
+def upload_file_image(mac):
+    if 'user' not in session:
+        return redirect(url_for("login"))
+
+    if "image" not in request.files:
+        return "No image uploaded", 400
+
+    file = request.files["image"]
+    if file.filename == "":
+        return "Empty filename", 400
+
+    try:
+        img = Image.open(file.stream)
+        dithered = dither_to_palette(img)  # Dither immediately
+
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        path = os.path.join(UPLOAD_FOLDER, f"{mac}.bmp")
+        dithered.save(path, format="BMP")  # Save dithered image
+
+        return redirect(url_for("endpoint_page", mac=mac))
+    except Exception as e:
+        return f"Error processing image: {e}", 500
+
+@app.route("/esp/endpoint/<mac>/upload", methods=["POST"])
+def upload_image(mac):
+    if 'user' not in session:
+        return redirect(url_for("login"))
+
+    if request.is_json:
+        data = request.get_json()
+        if "image" not in data:
+            return "No image data", 400
+
+        try:
+            import base64
+            from io import BytesIO
+
+            b64data = data["image"].split(",")[1]  # remove 'data:image/png;base64,'
+            img_data = base64.b64decode(b64data)
+            img = Image.open(BytesIO(img_data))
+            dithered = dither_to_palette(img)
+
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            path = os.path.join(UPLOAD_FOLDER, f"{mac}.bmp")
+            dithered.save(path, format="BMP")
+            return jsonify({"status": "saved"}), 200
+        except Exception as e:
+            return f"Error: {e}", 500
+    else:
+        return "Invalid content type", 415
+
+@app.route("/esp/save_canvas/<mac>", methods=["POST"])
+def save_canvas(mac):
+    if 'user' not in session:
+        return redirect(url_for("login"))
+
+    data = request.get_json()
+    image_data = data.get("image")
+    if not image_data:
+        return "Missing image data", 400
+
+    # Extract base64 image
+    import base64
+    from io import BytesIO
+
+    header, encoded = image_data.split(",", 1)
+    img_bytes = base64.b64decode(encoded)
+    img = Image.open(BytesIO(img_bytes))
+
+    path = os.path.join(UPLOAD_FOLDER, f"{mac}.bmp")
+    img = img.convert("RGB").resize((600, 448))  # Ensure correct format & size
+    img.save(path, format="BMP")
+
+    return "Saved", 200
+
+
+@app.route("/esp/images/<mac>.bmp")
+def serve_dithered(mac):
+    path = os.path.join(UPLOAD_FOLDER, f"{mac}.bmp")
+    if os.path.exists(path):
+        return send_file(path, mimetype="image/bmp")
+    return "Image not found", 404
+
 
 # ------------------------
 # Utility: Load/save registry
@@ -90,17 +216,22 @@ def select_endpoint():
 def endpoint_page(mac):
     if 'user' not in session:
         return redirect(url_for("login"))
+
     info = device_registry.get(mac)
     if not info:
         return "Endpoint not found", 404
-    return f'''
-        <h1>{info["user"]}'s device</h1>
-        <p>IP: {info["ip"]}</p>
-        <p>Last Seen: {info["last_seen"]}</p>
-        <p>MAC Address: {mac}</p>
-        <p>Registered By: {info["user"]}</p>
-        <a href="/esp/select">Back to list</a>
-    '''
+
+    image_path = os.path.join(UPLOAD_FOLDER, f"{mac}.bmp")
+    current_image = os.path.exists(image_path)
+
+    return render_template(
+        "endpoint.html",
+        mac=mac,
+        user=info["user"],
+        ip=info["ip"],
+        last_seen=info["last_seen"],
+        current_image=current_image
+    )
 
 # ------------------------
 # Logout
@@ -150,5 +281,5 @@ def serve_static(filename):
 if __name__ == "__main__":
     load_registry()
     print("Server running on port 2626")
-    app.run(host="0.0.0.0", port=2626)
+    app.run(host="0.0.0.0", port=2626, debug=True)
 
