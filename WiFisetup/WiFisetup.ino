@@ -67,6 +67,10 @@ void fetchAndDisplayBMP(const String& mac) {
 
   if (httpCode == 200) {
     WiFiClient* stream = http.getStreamPtr();
+    // Skip 54-byte BMP header
+    for (int i = 0; i < 54; i++) {
+      if (stream->available()) stream->read();
+    }
 
     const int width = 600;
     const int height = 448;
@@ -77,36 +81,33 @@ void fetchAndDisplayBMP(const String& mac) {
 
     EPD_5IN65F_init();
 
-    for (int row = height - 1; row >= 0; --row) {
-      int offset = row * rowBytes;
+   for (int row = 0; row < height; ++row) {
+  int bmpRow = height - 1 - row;  // flip vertically
+  int offset = bmpRow * rowBytes;
 
-      // Wait until the full row is available
-      while (stream->available() < rowBytes);
+  // Wait until the full row is available
+  while (stream->available() < rowBytes);
+  stream->readBytes(rowBuf, rowBytes);
 
-      // Read full row
-      stream->readBytes(rowBuf, rowBytes);
+  for (int col = width - 1; col >= 0; --col) {  // flip horizontally
+    int i = col * 3;
+    uint8_t b = rowBuf[i];
+    uint8_t g = rowBuf[i + 1];
+    uint8_t r = rowBuf[i + 2];
 
-      for (int col = 0; col < width; ++col) {
-        int i = col * 3;
-        uint8_t b = rowBuf[i];
-        uint8_t g = rowBuf[i + 1];
-        uint8_t r = rowBuf[i + 2];  // BMP uses BGR; swap to RGB
+    uint8_t epdColor = rgbToEpdIndex(r, g, b);
 
-        uint8_t epdColor = rgbToEpdIndex(r, g, b);
-
-        if (toggle) {
-          EPD_SendData((epdColor << 4) | last);
-        } else {
-          last = epdColor;
-        }
-
-        toggle = !toggle;
-      }
+    if (toggle) {
+      EPD_SendData((epdColor << 4) | last);
+    } else {
+      last = epdColor;
     }
 
-    if (!toggle) {
-      EPD_SendData(last << 4);
-    }
+    toggle = !toggle;
+  }
+}
+
+
 
     EPD_5IN65F_Show();
   } else {
