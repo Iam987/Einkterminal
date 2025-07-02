@@ -12,6 +12,7 @@
 #include "scripts.h" // JavaScript code
 #include "css.h"     // Cascading Style Sheets
 #include "html.h"    // HTML page of the tool
+#include <ArduinoJson.h>
 
 #define IMAGE_URL_BASE "http://kool105.ddns.net:2626/esp/images/"
 #define EEPROM_SIZE 96  // Total: 32 + 32 + 16 + 16
@@ -27,12 +28,63 @@ WebServer server(80);
 
 Ticker registerTicker;
 volatile bool shouldRegister = false;
-volatile int Timeout = 290;
+volatile bool RegisterFail = false;
+volatile int Timeout = 5;
 volatile int FailCount = 0;
+String lastImageVersion = ""; // Global variable to store last known version
 
 void IRAM_ATTR triggerRegister() {
   shouldRegister = true;
 }
+
+
+#include <ArduinoJson.h>
+
+void fetchAndDisplayWeather(const String& mac) {
+  String url = "http://kool105.ddns.net:2626/esp/weather/" + mac + ".json";
+  HTTPClient http;
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if (httpCode == 200) {
+    String payload = http.getString();
+    StaticJsonDocument<4096> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      Serial.println("JSON parse failed");
+      return;
+    }
+
+    const char* location = doc["location"];
+    Serial.printf("Weather for: %s\n", location);
+
+    JsonArray periods = doc["periods"].as<JsonArray>();
+
+    for (int i = 0; i < periods.size(); ++i) {
+      JsonObject p = periods[i];
+      const char* name = p["name"];
+      int temp = p["temperature"];
+      const char* unit = p["temperatureUnit"];
+      int pop = p["probabilityOfPrecipitation"];
+      const char* wind = p["windSpeed"];
+      const char* dir = p["windDirection"];
+      const char* icon = p["icon"];
+      const char* forecast = i < 3 ? p["detailedForecast"] : p["shortForecast"];
+
+      // Example: replace this with Paint_DrawString_EN as needed
+      Serial.printf("[%s] %d%s %d%% %s %s\n", name, temp, unit, pop, wind, forecast);
+    }
+
+    // Use Paint_DrawString_EN(...) to draw location and forecast info here
+    // EPD_5IN65F_Show();
+  } else {
+    Serial.println("Failed to fetch weather data");
+  }
+
+  http.end();
+}
+
+
 
 void registerWithServer() {
   String ssid, pass, user, userpass;
@@ -47,16 +99,69 @@ void registerWithServer() {
   int httpCode = http.POST(json);
   if (httpCode > 0) {
     Serial.printf("Registration response: %s\n", http.getString().c_str());
-    Timeout = 290;
+    RegisterFail = false;
+    Timeout = 5;
     FailCount = 0;
   } else {
     Serial.printf("Registration failed: %s\n", http.errorToString(httpCode).c_str());
-    Timeout = 10;
+    RegisterFail = true;
+    Timeout = 1;
     FailCount++;
-    if (FailCount > 30) ESP.restart();
+    if (FailCount > 90) ESP.restart();
   }
   http.end();
 }
+
+void fetchAndMaybeDisplayBMP(const String& mac) {
+  String versionUrl = "http://kool105.ddns.net:2626/esp/image_version/" + mac;
+
+  HTTPClient versionHttp;
+  versionHttp.begin(versionUrl);
+  int code = versionHttp.GET();
+
+  if (code == 200) {
+    String payload = versionHttp.getString();
+    versionHttp.end();
+
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      Serial.println("Failed to parse version JSON");
+      return;
+    }
+
+    bool needsUpdate = doc["update_required"];
+    String mode = doc["mode"] | "image";
+
+    Serial.printf("Mode: %s | Update Required: %s\n", mode.c_str(), needsUpdate ? "Yes" : "No");
+
+    if (!needsUpdate) {
+      Serial.print(".");
+      Timeout = 5;
+      FailCount = 0;
+      return;
+    }
+
+    if (mode == "weather") {
+      Serial.println("Fetching weather...");
+      fetchAndDisplayWeather(mac);
+    } else {
+      Serial.println("Fetching image...");
+      fetchAndDisplayBMP(mac);
+    }
+
+    Timeout = 5;
+    FailCount = 0;
+  } else {
+    Serial.println("Version check failed");
+    Timeout = 1;
+    FailCount++;
+    if (FailCount > 90) ESP.restart();
+    versionHttp.end();
+  }
+}
+
+
 
 void fetchAndDisplayBMP(const String& mac) {
   String url = "http://kool105.ddns.net:2626/esp/images/" + mac + ".bmp";
@@ -67,7 +172,8 @@ void fetchAndDisplayBMP(const String& mac) {
 
   if (httpCode == 200) {
     WiFiClient* stream = http.getStreamPtr();
-    // Skip 54-byte BMP header
+
+    // Skip BMP header (54 bytes)
     for (int i = 0; i < 54; i++) {
       if (stream->available()) stream->read();
     }
@@ -81,33 +187,37 @@ void fetchAndDisplayBMP(const String& mac) {
 
     EPD_5IN65F_init();
 
-   for (int row = 0; row < height; ++row) {
-  int bmpRow = height - 1 - row;  // flip vertically
-  int offset = bmpRow * rowBytes;
+    for (int row = 0; row < height; ++row) {
+      while (stream->available() < rowBytes);
+      stream->readBytes(rowBuf, rowBytes);
 
-  // Wait until the full row is available
-  while (stream->available() < rowBytes);
-  stream->readBytes(rowBuf, rowBytes);
+      for (int col = 0; col < width; col += 2) {
+        // Flip pairs of pixels: col and col+1 are swapped
+        for (int j = 1; j >= 0; --j) {
+          int flippedCol = col + j;
+          if (flippedCol >= width) continue;
+          int i = flippedCol * 3;
 
-  for (int col = width - 1; col >= 0; --col) {  // flip horizontally
-    int i = col * 3;
-    uint8_t b = rowBuf[i];
-    uint8_t g = rowBuf[i + 1];
-    uint8_t r = rowBuf[i + 2];
+          uint8_t b = rowBuf[i];
+          uint8_t g = rowBuf[i + 1];
+          uint8_t r = rowBuf[i + 2];
 
-    uint8_t epdColor = rgbToEpdIndex(r, g, b);
+          uint8_t epdColor = rgbToEpdIndex(r, g, b);
 
-    if (toggle) {
-      EPD_SendData((epdColor << 4) | last);
-    } else {
-      last = epdColor;
+          if (toggle) {
+            EPD_SendData((epdColor << 4) | last);
+          } else {
+            last = epdColor;
+          }
+
+          toggle = !toggle;
+        }
+      }
     }
 
-    toggle = !toggle;
-  }
-}
-
-
+    if (!toggle) {
+      EPD_SendData(last << 4);
+    }
 
     EPD_5IN65F_Show();
   } else {
@@ -242,11 +352,6 @@ void setup() {
   // SPI initialization
     EPD_initSPI();
 
-  if (!SPIFFS.begin(true)) {
-  Serial.println("SPIFFS Mount Failed");
-  return;
-}
-
   String ssid, pass, user, userpass;
   loadWiFiCredentials(ssid, pass, user, userpass);
 
@@ -259,7 +364,7 @@ void setup() {
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
     registerWithServer();
-    fetchAndDisplayBMP(WiFi.macAddress());
+    fetchAndMaybeDisplayBMP(WiFi.macAddress());
     registerTicker.attach(Timeout,triggerRegister);
     
   }
@@ -270,7 +375,12 @@ void loop() {
 
   if (shouldRegister){
     shouldRegister = false;
-    registerWithServer();
+    if(!RegisterFail){
+      fetchAndMaybeDisplayBMP(WiFi.macAddress());
+    }
+    else{
+      registerWithServer();
+    }
     registerTicker.attach(Timeout,triggerRegister);
   }
 }
