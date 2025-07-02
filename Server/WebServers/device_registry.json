@@ -1,0 +1,33 @@
+{
+  "CC:7B:5C:BA:01:E0": {
+    "ip": "174.53.226.104",
+    "user": "Iam987",
+    "pass": "beep",
+    "last_seen": "2025-07-02T16:25:04.651705",
+    "lat": 44.8782,
+    "lon": -93.3716,
+    "city": "Minneapolis",
+    "state": "Minnesota",
+    "mode": "image",
+    "update_required": true,
+    "weather_schedule": [
+      {
+        "start": "16:02",
+        "end": "16:20"
+      }
+    ],
+    "timezone": "America/Chicago"
+  },
+  "CC:7B:5C:B9:F1:8C": {
+    "ip": "174.53.226.104",
+    "user": "CRAXYMAN",
+    "pass": "MeepMoop",
+    "last_seen": "2025-07-02T10:03:38.135930",
+    "lat": 44.8782,
+    "lon": -93.3716,
+    "city": "Minneapolis",
+    "state": "Minnesota",
+    "mode": "image",
+    "update_required": true
+  }
+}

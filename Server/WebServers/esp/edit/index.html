@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 Image Editor</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 2em; }
+    canvas { border: 2px solid black; cursor: crosshair; }
+    .toolbar { margin: 1em 0; }
+    .color-picker button {
+      width: 24px; height: 24px; margin: 0 2px; border: none; cursor: pointer;
+    }
+    .tool-btn { margin: 0 5px; cursor: pointer; padding: 5px; }
+  </style>
+</head>
+<body>
+  <h1>Endpoint: {{ mac }}</h1>
+
+  <form id="uploadForm" enctype="multipart/form-data" method="POST" action="/endpoint/{{ mac }}/upload">
+    <input type="file" id="fileInput" name="image" accept="image/*">
+    <button type="submit">Upload</button>
+  </form>
+
+  {% if current_image %}
+    <h3>Current Image:</h3>
+    <img src="/images/{{ mac }}.bmp" width="300">
+  {% endif %}
+
+  <canvas id="canvas" width="600" height="448"></canvas>
+
+  <div class="toolbar">
+    <button class="tool-btn" onclick="selectTool('select')">←</button>
+    <button class="tool-btn" onclick="selectTool('draw')">✎</button>
+    <button class="tool-btn" onclick="selectTool('text')">A</button>
+    <button class="tool-btn" onclick="selectTool('zoom')">🔍</button>
+    <button class="tool-btn" onclick="selectTool('crop')">🗀️</button>
+  </div>
+
+  <div class="color-picker">
+    <button style="background: black" onclick="setColor([0,0,0])"></button>
+    <button style="background: white" onclick="setColor([255,255,255])"></button>
+    <button style="background: lime" onclick="setColor([0,255,0])"></button>
+    <button style="background: blue" onclick="setColor([0,0,255])"></button>
+    <button style="background: red" onclick="setColor([255,0,0])"></button>
+    <button style="background: yellow" onclick="setColor([255,255,0])"></button>
+    <button style="background: orange" onclick="setColor([255,128,0])"></button>
+  </div>
+
+  <p><a href="/select">Back to list</a></p>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let currentColor = "#000000";
+    let tool = "draw";
+    let drawing = false;
+
+    function setColor(rgb) {
+      currentColor = `rgb(${rgb.join(',')})`;
+    }
+
+    function selectTool(name) {
+      tool = name;
+    }
+
+    canvas.addEventListener("mousedown", e => {
+      if (tool === 'draw') {
+        drawing = true;
+        ctx.beginPath();
+        ctx.moveTo(e.offsetX, e.offsetY);
+      }
+    });
+
+    canvas.addEventListener("mousemove", e => {
+      if (drawing && tool === 'draw') {
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = 3;
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      drawing = false;
+      ctx.closePath();
+    });
+  </script>
+</body>
+</html>
+

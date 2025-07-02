@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ user }}'s Device Editor</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 2em; }
+    canvas { border: 2px solid black; cursor: crosshair; }
+    .toolbar { margin: 1em 0; }
+    .color-picker button {
+      width: 24px; height: 24px; margin: 0 2px; border: none; cursor: pointer;
+    }
+    .tool-btn { margin: 0 5px; cursor: pointer; padding: 5px; }
+  </style>
+</head>
+<body>
+  <h1>{{ user }}'s Device Editor</h1>
+
+  <canvas id="canvas" width="600" height="448"></canvas>
+  <br>
+  <button onclick="toggleOrientation()">🔄 Toggle Orientation</button>
+  <br>
+
+  <input type="file" id="fileInput" accept="image/*">
+  <button onclick="ditherAndDisplay()">Load</button>
+
+  <div id="loadingSpinner" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(255,255,255,0.7); z-index:9999; text-align:center; padding-top:20%;">
+    <div style="font-size:2em;">⏳ Processing Image...</div>
+  </div>
+
+  <button onclick="clearCanvas()">🆕 New Blank Canvas</button>
+  <button onclick="saveCanvas()">💾 Save</button>
+
+  <div class="toolbar">
+    <button class="tool-btn" onclick="selectTool('draw')">✎ Draw</button>
+    <button class="tool-btn" onclick="selectTool('text')">A Text</button>
+    <select id="fontSize" class="tool-btn">
+      <option value="16">16px</option>
+      <option value="24">24px</option>
+      <option value="32" selected>32px</option>
+      <option value="48">48px</option>
+    </select>
+    <button class="tool-btn" onclick="undo()">↶ Undo</button>
+  </div>
+
+  <div class="color-picker">
+    <button style="background: black" onclick="setColor([0,0,0])"></button>
+    <button style="background: white" onclick="setColor([255,255,255])"></button>
+    <button style="background: lime" onclick="setColor([50,220,50])"></button>
+    <button style="background: blue" onclick="setColor([0,0,255])"></button>
+    <button style="background: red" onclick="setColor([255,30,30])"></button>
+    <button style="background: yellow" onclick="setColor([227,192,39])"></button>
+    <button style="background: orange" onclick="setColor([181,61,27])"></button>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/heic2any"></script>
+  
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let currentColor = "#000000";
+    let tool = "draw";
+    let drawing = false;
+    let undoStack = [];
+
+const PALETTE = [
+//    [0, 0, 0],         // Index 0: black
+//    [255, 255, 255],   // Index 1: white
+//    [0, 255, 0],       // Index 2: green
+//    [0, 0, 255],       // Index 3: blue
+//    [255, 0, 0],       // Index 4: red
+//    [255, 255, 0],     // Index 5: yellow
+//    [255, 128, 0]      // Index 6: orange
+
+[0, 0, 0],         // Index 0: black
+[255, 255, 255],   // Index 1: white
+[50, 220, 50],       // Index 2: green
+[40, 40, 255],       // Index 3: blue
+[255, 30, 30],       // Index 4: red
+[227, 192, 39],     // Index 5: yellow
+[181, 61, 27]      // Index 6: orange
+ // [46, 32, 39],     // Black
+ // [255, 255, 255],  // White
+ // [42, 64, 38],     // Green
+ // [0, 12, 102],     // Blue
+ // [153, 41, 18],    // Red
+ // [227, 192, 39],   // Yellow
+ // [181, 61, 27]     // Orange
+];
+
+const RGB_PALETTE = [
+  [0, 0, 0],         // Index 0: black
+  [255, 255, 255],   // Index 1: white
+  [0, 255, 0],       // Index 2: green
+  [0, 0, 255],       // Index 3: blue
+  [255, 0, 0],       // Index 4: red
+  [255, 255, 0],     // Index 5: yellow
+  [255, 128, 0]      // Index 6: orange
+];
+
+
+    function setColor(rgb) {
+      currentColor = `rgb(${rgb.join(',')})`;
+    }
+
+    function selectTool(name) {
+      tool = name;
+    }
+
+    function undo() {
+      if (undoStack.length > 0) {
+        const last = undoStack.pop();
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0);
+        img.src = last;
+      }
+    }
+
+    function pushUndoState() {
+      undoStack.push(canvas.toDataURL());
+    }
+
+    canvas.addEventListener("mousedown", e => {
+      if (tool === 'draw') {
+        pushUndoState();
+        drawing = true;
+        ctx.beginPath();
+        ctx.moveTo(e.offsetX, e.offsetY);
+      } else if (tool === 'text') {
+        pushUndoState();
+        const text = prompt("Enter text:");
+        if (text) {
+          const fontSize = document.getElementById("fontSize").value;
+          ctx.font = `${fontSize}px sans-serif`;
+          ctx.fillStyle = currentColor;
+          ctx.fillText(text, e.offsetX, e.offsetY);
+        }
+      }
+    });
+
+    canvas.addEventListener("mousemove", e => {
+      if (drawing && tool === 'draw') {
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = 3;
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      if (tool === 'draw') {
+        drawing = false;
+        ctx.closePath();
+      }
+    });
+
+    canvas.addEventListener("touchstart", (e) => {
+  if (tool === 'draw') {
+    pushUndoState();
+    drawing = true;
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  } else if (tool === 'text') {
+    pushUndoState();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    const text = prompt("Enter text:");
+    if (text) {
+      const fontSize = document.getElementById("fontSize").value;
+      ctx.font = `${fontSize}px sans-serif`;
+      ctx.fillStyle = currentColor;
+      ctx.fillText(text, x, y);
+    }
+  }
+  e.preventDefault(); // Prevent scrolling
+});
+
+canvas.addEventListener("touchmove", (e) => {
+  if (drawing && tool === 'draw') {
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    ctx.strokeStyle = currentColor;
+    ctx.lineWidth = 3;
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+  e.preventDefault(); // Prevent scrolling
+});
+
+canvas.addEventListener("touchend", () => {
+  if (tool === 'draw') {
+    drawing = false;
+    ctx.closePath();
+  }
+});
+
+function clearCanvas() {
+  pushUndoState();
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function saveCanvas() {
+  const isPortrait = canvas.height > canvas.width;
+
+  // Always save as 600x448 (landscape format expected by ESP32)
+  const offCanvas = document.createElement("canvas");
+  const offCtx = offCanvas.getContext("2d");
+  offCanvas.width = 600;
+  offCanvas.height = 448;
+
+  if (isPortrait) {
+    // Rotate portrait canvas to fit landscape output
+    offCtx.save();
+    offCtx.translate(0, 448);           // move to right edge
+    offCtx.rotate(-Math.PI / 2);         // rotate 90 degrees clockwise
+    offCtx.translate(0, canvas.height);
+    offCtx.scale(1, -1);
+    offCtx.drawImage(canvas, 0, 0);     // draw portrait canvas rotated
+    offCtx.restore();
+  } else {
+    // Draw directly for landscape
+    offCtx.translate(0, canvas.height);
+    offCtx.scale(1, -1);
+    offCtx.drawImage(canvas, 0, 0);
+  }
+
+  // Flip vertically
+  offCtx.translate(0, offCanvas.height);
+  offCtx.scale(1, -1);
+  const imageData = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+  floydSteinbergDither(imageData);
+  offCtx.putImageData(imageData, 0, 0);
+
+  // Save to server
+  const dataUrl = offCanvas.toDataURL("image/png");
+  fetch("/esp/save_canvas/{{ mac }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: dataUrl })
+  }).then(res => {
+    if (res.ok) {
+      alert("Canvas saved!");
+      const preview = document.getElementById("savedPreview");
+      preview.src = "/esp/images/{{ mac }}.bmp?" + new Date().getTime(); // bust cache
+    } else {
+      alert("Failed to save canvas.");
+    }
+  });
+}
+
+
+
+let isPortrait = false;
+
+function toggleOrientation() {
+  // Store current image
+  const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Toggle dimensions
+  isPortrait = !isPortrait;
+  const newWidth = isPortrait ? 448 : 600;
+  const newHeight = isPortrait ? 600 : 448;
+
+  // Resize canvas
+  canvas.width = newWidth;
+  canvas.height = newHeight;
+
+  // White background
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, newWidth, newHeight);
+
+  // Restore snapshot (cropped to fit if needed)
+  ctx.putImageData(snapshot, 0, 0);
+}
+
+
+    function showSpinner(show = true) {
+      document.getElementById("loadingSpinner").style.display = show ? "block" : "none";
+    }
+
+async function ditherAndDisplay() {
+  const file = document.getElementById("fileInput").files[0];
+  if (!file) return alert("No image selected");
+
+  showSpinner(true);
+
+  try {
+    let blob = file;
+
+    // If HEIC, convert it
+    if (file.type === "image/heic" || file.name.toLowerCase().endsWith(".heic")) {
+      blob = await heic2any({ blob: file, toType: "image/jpeg" });
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      ctx.putImageData(imageData, 0, 0);
+      showSpinner(false);
+    };
+    img.src = URL.createObjectURL(blob);
+  } catch (err) {
+    showSpinner(false);
+    alert("Failed to process image: " + err.message);
+  }
+}
+
+function nearestColor(pixel) {
+  let minDist = Infinity;
+  let bestIndex = 0;
+  for (let i = 0; i < PALETTE.length; i++) {
+    const color = PALETTE[i];
+    const dist = color.reduce((sum, c, j) => sum + (c - pixel[j]) ** 2, 0);
+    if (dist < minDist) {
+      minDist = dist;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
+
+function floydSteinbergDither(imgData) {
+  const { data, width, height } = imgData;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const oldPixel = [data[i], data[i + 1], data[i + 2]];
+      const newIndex = nearestColor(oldPixel);
+      const newPixel = RGB_PALETTE[newIndex];
+      const newPixelPal = PALETTE[newIndex];
+      const error = oldPixel.map((v, idx) => v - newPixelPal[idx]);
+
+      // Apply new quantized color
+      [data[i], data[i + 1], data[i + 2]] = newPixel;
+
+      // Skip tiny errors to reduce noise
+      if (error.reduce((sum, e) => sum + Math.abs(e), 0) < 50) continue;
+
+      // Distribute reduced error to neighbors (less aggressive diffusion)
+      function distribute(dx, dy, factor) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) return;
+
+        const ni = (ny * width + nx) * 4;
+        for (let c = 0; c < 3; c++) {
+          data[ni + c] = Math.min(255, Math.max(0, data[ni + c] + error[c] * factor));
+        }
+      }
+
+      distribute(1, 0, 5 / 16);
+      distribute(-1, 1, 3 / 16);
+      distribute(0, 1, 2 / 16);
+      distribute(1, 1, 1 / 16);
+    }
+  }
+}
+
+
+  </script>
+
+  <p>Last Seen: {{ last_seen }}</p>
+  <p>Registered By: {{ user }}</p>
+  <p><a href="/esp/select">Back to list</a></p>
+  <hr>
+<button onclick="toggleSaved()">Show/Hide Current Image</button>
+
+<div id="savedContainer" style="display: none; margin-top: 1em;">
+<div style="margin-top: 1em; border: 2px dashed #999; padding: 10px; display: inline-block;">
+  <img id="savedPreview" src="/esp/images/{{ mac }}.bmp?{{ '%f' }}" width="300" style="transform:scaleY(-1);" alt="Saved Image">
+</div>
+</div>
+
+<p><a href="/esp/schedule/{{ mac }}">Weather Schedule</a></p>
+<script>
+function toggleSaved() {
+  const container = document.getElementById("savedContainer");
+  container.style.display = container.style.display === "none" ? "block" : "none";
+}
+</script>
+<script>
+// Set up blank canvas with white background
+window.addEventListener("load", () => {
+  pushUndoState();
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+});
+</script>
+
+
+</body>
+</html>
+
