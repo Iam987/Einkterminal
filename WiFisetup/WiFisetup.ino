@@ -29,6 +29,7 @@ WebServer server(80);
 Ticker registerTicker;
 volatile bool shouldRegister = false;
 volatile bool RegisterFail = false;
+volatile bool WeatherFail = false;
 volatile int Timeout = 5;
 volatile int FailCount = 0;
 String lastImageVersion = ""; // Global variable to store last known version
@@ -41,12 +42,13 @@ void IRAM_ATTR triggerRegister() {
 #include <ArduinoJson.h>
 
 void fetchAndDisplayWeather(const String& mac) {
-  String url = "http://kool105.ddns.net:2626/esp/weather/" + mac + ".json";
+  String url = "http://kool105.ddns.net:2626/esp/weather_data/" + mac + ".json";
   HTTPClient http;
   http.begin(url);
   int httpCode = http.GET();
 
   if (httpCode == 200) {
+    WeatherFail = false;
     String payload = http.getString();
     StaticJsonDocument<4096> doc;
     DeserializationError error = deserializeJson(doc, payload);
@@ -79,6 +81,8 @@ void fetchAndDisplayWeather(const String& mac) {
     // EPD_5IN65F_Show();
   } else {
     Serial.println("Failed to fetch weather data");
+    WeatherFail = true;
+
   }
 
   http.end();
@@ -135,7 +139,7 @@ void fetchAndMaybeDisplayBMP(const String& mac) {
 
     Serial.printf("Mode: %s | Update Required: %s\n", mode.c_str(), needsUpdate ? "Yes" : "No");
 
-    if (!needsUpdate) {
+    if (!needsUpdate && !WeatherFail) {
       Serial.print(".");
       Timeout = 5;
       FailCount = 0;
