@@ -6,19 +6,19 @@
 #include <WiFiClient.h>
 #include <FS.h>
 #include <SPIFFS.h>
-#include "buff.h" // POST request data accumulator
-#include "epd.h"  // e-Paper driver
+#include "buff.h"  // POST request data accumulator
+#include "epd.h"   // e-Paper driver
 #include <algorithm>
-#include "scripts.h" // JavaScript code
-#include "css.h"     // Cascading Style Sheets
-#include "html.h"    // HTML page of the tool
+#include "scripts.h"  // JavaScript code
+#include "css.h"      // Cascading Style Sheets
+#include "html.h"     // HTML page of the tool
 #include <ArduinoJson.h>
 
 #define IMAGE_URL_BASE "http://kool105.ddns.net:2626/esp/images/"
 #define EEPROM_SIZE 96  // Total: 32 + 32 + 16 + 16
-#define SSID_ADDR    0
-#define PASS_ADDR    32
-#define USER_ADDR    64
+#define SSID_ADDR 0
+#define PASS_ADDR 32
+#define USER_ADDR 64
 #define USERPASS_ADDR 80
 
 const char* fallbackSSID = "ESP32-Setup";
@@ -32,68 +32,17 @@ volatile bool RegisterFail = false;
 volatile bool WeatherFail = false;
 volatile int Timeout = 5;
 volatile int FailCount = 0;
-String lastImageVersion = ""; // Global variable to store last known version
+String lastImageVersion = "";  // Global variable to store last known version
 
 void IRAM_ATTR triggerRegister() {
   shouldRegister = true;
 }
 
 
-#include <ArduinoJson.h>
-
-void fetchAndDisplayWeather(const String& mac) {
-  String url = "http://kool105.ddns.net:2626/esp/weather_data/" + mac + ".json";
-  HTTPClient http;
-  http.begin(url);
-  int httpCode = http.GET();
-
-  if (httpCode == 200) {
-    WeatherFail = false;
-    String payload = http.getString();
-    StaticJsonDocument<4096> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (error) {
-      Serial.println("JSON parse failed");
-      return;
-    }
-
-    const char* location = doc["location"];
-    Serial.printf("Weather for: %s\n", location);
-
-    JsonArray periods = doc["periods"].as<JsonArray>();
-
-    for (int i = 0; i < periods.size(); ++i) {
-      JsonObject p = periods[i];
-      const char* name = p["name"];
-      int temp = p["temperature"];
-      const char* unit = p["temperatureUnit"];
-      int pop = p["probabilityOfPrecipitation"];
-      const char* wind = p["windSpeed"];
-      const char* dir = p["windDirection"];
-      const char* icon = p["icon"];
-      const char* forecast = i < 3 ? p["detailedForecast"] : p["shortForecast"];
-
-      // Example: replace this with Paint_DrawString_EN as needed
-      Serial.printf("[%s] %d%s %d%% %s %s\n", name, temp, unit, pop, wind, forecast);
-    }
-
-    // Use Paint_DrawString_EN(...) to draw location and forecast info here
-    // EPD_5IN65F_Show();
-  } else {
-    Serial.println("Failed to fetch weather data");
-    WeatherFail = true;
-
-  }
-
-  http.end();
-}
-
-
-
 void registerWithServer() {
   String ssid, pass, user, userpass;
   loadWiFiCredentials(ssid, pass, user, userpass);
-  
+
   String mac = WiFi.macAddress();
   HTTPClient http;
   http.begin("http://kool105.ddns.net:2626/esp/register");
@@ -148,10 +97,10 @@ void fetchAndMaybeDisplayBMP(const String& mac) {
 
     if (mode == "weather") {
       Serial.println("Fetching weather...");
-      fetchAndDisplayWeather(mac);
+      fetchAndDisplayBMP(mac, "weather_data/");
     } else {
       Serial.println("Fetching image...");
-      fetchAndDisplayBMP(mac);
+      fetchAndDisplayBMP(mac, "images/");
     }
 
     Timeout = 5;
@@ -167,8 +116,8 @@ void fetchAndMaybeDisplayBMP(const String& mac) {
 
 
 
-void fetchAndDisplayBMP(const String& mac) {
-  String url = "http://kool105.ddns.net:2626/esp/images/" + mac + ".bmp";
+void fetchAndDisplayBMP(const String& mac, const String& path1) {
+  String url = "http://kool105.ddns.net:2626/esp/" + path1 + mac + ".bmp";
 
   HTTPClient http;
   http.begin(url);
@@ -192,7 +141,8 @@ void fetchAndDisplayBMP(const String& mac) {
     EPD_5IN65F_init();
 
     for (int row = 0; row < height; ++row) {
-      while (stream->available() < rowBytes);
+      while (stream->available() < rowBytes)
+        ;
       stream->readBytes(rowBuf, rowBytes);
 
       for (int col = 0; col < width; col += 2) {
@@ -232,14 +182,14 @@ void fetchAndDisplayBMP(const String& mac) {
 }
 
 uint8_t rgbToEpdIndex(uint8_t r, uint8_t g, uint8_t b) {
-  if (r < 64 && g < 64 && b < 64) return 0; // Black
-  if (r > 200 && g > 200 && b > 200) return 1; // White
-  if (r < 80 && g > 180 && b < 80) return 2; // Green
-  if (r < 80 && g < 80 && b > 180) return 3; // Blue
-  if (r > 180 && g < 80 && b < 80) return 4; // Red
-  if (r > 200 && g > 180 && b < 100) return 5; // Yellow
-  if (r > 200 && g > 100 && g < 180 && b < 80) return 6; // Orange
-  return 1; // Default to white
+  if (r < 64 && g < 64 && b < 64) return 0;               // Black
+  if (r > 200 && g > 200 && b > 200) return 1;            // White
+  if (r < 80 && g > 180 && b < 80) return 2;              // Green
+  if (r < 80 && g < 80 && b > 180) return 3;              // Blue
+  if (r > 180 && g < 80 && b < 80) return 4;              // Red
+  if (r > 200 && g > 180 && b < 100) return 5;            // Yellow
+  if (r > 200 && g > 100 && g < 180 && b < 80) return 6;  // Orange
+  return 1;                                               // Default to white
 }
 
 
@@ -274,7 +224,7 @@ void loadWiFiCredentials(String& ssid, String& pass, String& user, String& userp
 }
 
 void startAPMode() {
-  WiFi.disconnect(true);      // Clear any previous WiFi connection
+  WiFi.disconnect(true);  // Clear any previous WiFi connection
   delay(1000);
 
   WiFi.mode(WIFI_AP);
@@ -285,7 +235,7 @@ void startAPMode() {
   Serial.println(IP);
 
   server.on("/", []() {
-  server.send(200, "text/html", R"rawliteral(
+    server.send(200, "text/html", R"rawliteral(
     <form action="/save" method="GET">
       SSID: <input name="ssid"><br>
       Password: <input name="pass" type="password"><br>
@@ -297,18 +247,18 @@ void startAPMode() {
       <input type="submit" value="Restart">
     </form>
   )rawliteral");
-});
+  });
 
-server.on("/save", []() {
-  String ssid = server.arg("ssid");
-  String pass = server.arg("pass");
-  String user = server.arg("user");
-  String userpass = server.arg("userpass");
-  saveWiFiCredentials(ssid, pass, user, userpass);
-  server.send(200, "text/html", "Saved. Restarting...");
-  delay(1000);
-  ESP.restart();
-});
+  server.on("/save", []() {
+    String ssid = server.arg("ssid");
+    String pass = server.arg("pass");
+    String user = server.arg("user");
+    String userpass = server.arg("userpass");
+    saveWiFiCredentials(ssid, pass, user, userpass);
+    server.send(200, "text/html", "Saved. Restarting...");
+    delay(1000);
+    ESP.restart();
+  });
 
   server.on("/restart", []() {
     server.send(200, "text/html", "Restarting...");
@@ -337,7 +287,7 @@ bool tryConnectWiFi(const String& ssid, const String& pass, int timeout = 10000)
 
 void fetchWebText() {
   HTTPClient http;
-  http.begin("http://kool105.ddns.net:2626/esp"); // Replace with your URL
+  http.begin("http://kool105.ddns.net:2626/esp");  // Replace with your URL
   int httpCode = http.GET();
   if (httpCode > 0) {
     String payload = http.getString();
@@ -354,7 +304,7 @@ void setup() {
   EEPROM.begin(EEPROM_SIZE);
 
   // SPI initialization
-    EPD_initSPI();
+  EPD_initSPI();
 
   String ssid, pass, user, userpass;
   loadWiFiCredentials(ssid, pass, user, userpass);
@@ -369,22 +319,20 @@ void setup() {
     Serial.println(WiFi.localIP());
     registerWithServer();
     fetchAndMaybeDisplayBMP(WiFi.macAddress());
-    registerTicker.attach(Timeout,triggerRegister);
-    
+    registerTicker.attach(Timeout, triggerRegister);
   }
 }
 
 void loop() {
   server.handleClient();
 
-  if (shouldRegister){
+  if (shouldRegister) {
     shouldRegister = false;
-    if(!RegisterFail){
+    if (!RegisterFail) {
       fetchAndMaybeDisplayBMP(WiFi.macAddress());
-    }
-    else{
+    } else {
       registerWithServer();
     }
-    registerTicker.attach(Timeout,triggerRegister);
+    registerTicker.attach(Timeout, triggerRegister);
   }
 }

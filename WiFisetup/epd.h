@@ -102,24 +102,24 @@ void EpdSpiTransferCallback(byte data)
 }
 
 
-unsigned char DEV_SPI_ReadByte()
-{
-    unsigned char j=0xff;
-    GPIO_Mode(PIN_SPI_DIN, 0);
-    digitalWrite(PIN_SPI_CS, GPIO_PIN_RESET);
-    for (int i = 0; i < 8; i++)
-    {
-        j = j << 1;
-        if (digitalRead(PIN_SPI_DIN))  j = j | 0x01;
-        else                            j = j & 0xfe;
+unsigned char DEV_SPI_ReadByte();
+// {
+//     unsigned char j=0xff;
+//     GPIO_Mode(PIN_SPI_DIN, 0);
+//     digitalWrite(PIN_SPI_CS, GPIO_PIN_RESET);
+//     for (int i = 0; i < 8; i++)
+//     {
+//         j = j << 1;
+//         if (digitalRead(PIN_SPI_DIN))  j = j | 0x01;
+//         else                            j = j & 0xfe;
         
-        digitalWrite(PIN_SPI_SCK, GPIO_PIN_SET);     
-        digitalWrite(PIN_SPI_SCK, GPIO_PIN_RESET);
-    }
-    digitalWrite(PIN_SPI_CS, GPIO_PIN_SET);
-    GPIO_Mode(PIN_SPI_DIN, 1);
-    return j;
-}
+//         digitalWrite(PIN_SPI_SCK, GPIO_PIN_SET);     
+//         digitalWrite(PIN_SPI_SCK, GPIO_PIN_RESET);
+//     }
+//     digitalWrite(PIN_SPI_CS, GPIO_PIN_SET);
+//     GPIO_Mode(PIN_SPI_DIN, 1);
+//     return j;
+// }
 
 byte lut_vcom0[] = { 15, 0x0E, 0x14, 0x01, 0x0A, 0x06, 0x04, 0x0A, 0x0A, 0x0F, 0x03, 0x03, 0x0C, 0x06, 0x0A, 0x00 };
 byte lut_w    [] = { 15, 0x0E, 0x14, 0x01, 0x0A, 0x46, 0x04, 0x8A, 0x4A, 0x0F, 0x83, 0x43, 0x0C, 0x86, 0x0A, 0x04 };
